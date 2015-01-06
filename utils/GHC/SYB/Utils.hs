@@ -185,11 +185,16 @@ import qualified OccName(occNameString)
 import Bag(Bag,bagToList)
 import Var(Var)
 import FastString(FastString)
+
+#if __GLASGOW_HASKELL__ < 710
 import NameSet(NameSet,nameSetToList)
+#else
+import NameSet(NameSet,nameSetElems)
+#endif
 
 #if __GLASGOW_HASKELL__ < 700
 import GHC.SYB.Instances
-#endif 
+#endif
 
 import Control.Monad
 import Data.List
@@ -203,18 +208,23 @@ showSDoc_ = showSDoc
 showSDoc_ = showSDoc tracingDynFlags
 #endif
 
+#if __GLASGOW_HASKELL__ >= 710
+nameSetToList :: NameSet -> [Name]
+nameSetToList = nameSetElems
+#endif
+
 -- | Ghc Ast types tend to have undefined holes, to be filled
 --   by later compiler phases. We tag Asts with their source,
 --   so that we can avoid such holes based on who generated the Asts.
 data Stage = Parser | Renamer | TypeChecker deriving (Eq,Ord,Show)
 
 -- | Generic Data-based show, with special cases for GHC Ast types,
---   and simplistic indentation-based layout (the 'Int' parameter); 
---   showing abstract types abstractly and avoiding known potholes 
+--   and simplistic indentation-based layout (the 'Int' parameter);
+--   showing abstract types abstractly and avoiding known potholes
 --   (based on the 'Stage' that generated the Ast)
 showData :: Data a => Stage -> Int -> a -> String
-showData stage n = 
-  generic `ext1Q` list `extQ` string `extQ` fastString `extQ` srcSpan 
+showData stage n =
+  generic `ext1Q` list `extQ` string `extQ` fastString `extQ` srcSpan
           `extQ` name `extQ` occName `extQ` moduleName `extQ` var `extQ` dataCon
           `extQ` overLit
           `extQ` bagName `extQ` bagRdrName `extQ` bagVar `extQ` nameSet
@@ -227,14 +237,14 @@ showData stage n =
                  ++ space (concat (intersperse " " (gmapQ (showData stage (n+1)) t))) ++ ")"
         space "" = ""
         space s  = ' ':s
-        indent n = "\n" ++ replicate n ' ' 
+        indent n = "\n" ++ replicate n ' '
         string     = show :: String -> String
         fastString = ("{FastString: "++) . (++"}") . show :: FastString -> String
-        list l     = indent n ++ "[" 
+        list l     = indent n ++ "["
                               ++ concat (intersperse "," (map (showData stage (n+1)) l)) ++ "]"
 
         name       = ("{Name: "++) . (++"}") . showSDoc_ . ppr :: Name -> String
-        occName    = ("{OccName: "++) . (++"}") .  OccName.occNameString 
+        occName    = ("{OccName: "++) . (++"}") .  OccName.occNameString
         moduleName = ("{ModuleName: "++) . (++"}") . showSDoc_ . ppr :: ModuleName -> String
         srcSpan    = ("{"++) . (++"}") . showSDoc_ . ppr :: SrcSpan -> String
         var        = ("{Var: "++) . (++"}") . showSDoc_ . ppr :: Var -> String
@@ -244,16 +254,16 @@ showData stage n =
         overLit    = ("{HsOverLit:"++) . (++"}") . showSDoc_ . ppr
 
         bagRdrName:: Bag (Located (HsBind RdrName)) -> String
-        bagRdrName = ("{Bag(Located (HsBind RdrName)): "++) . (++"}") . list . bagToList 
+        bagRdrName = ("{Bag(Located (HsBind RdrName)): "++) . (++"}") . list . bagToList
         bagName   :: Bag (Located (HsBind Name)) -> String
-        bagName    = ("{Bag(Located (HsBind Name)): "++) . (++"}") . list . bagToList 
+        bagName    = ("{Bag(Located (HsBind Name)): "++) . (++"}") . list . bagToList
         bagVar    :: Bag (Located (HsBind Var)) -> String
-        bagVar     = ("{Bag(Located (HsBind Var)): "++) . (++"}") . list . bagToList 
+        bagVar     = ("{Bag(Located (HsBind Var)): "++) . (++"}") . list . bagToList
 
-        nameSet | stage `elem` [Parser,TypeChecker] 
+        nameSet | stage `elem` [Parser,TypeChecker]
                 = const ("{!NameSet placeholder here!}") :: NameSet -> String
-                | otherwise     
-                = ("{NameSet: "++) . (++"}") . list . nameSetToList 
+                | otherwise
+                = ("{NameSet: "++) . (++"}") . list . nameSetToList
 
 #if __GLASGOW_HASKELL__ <= 708
         postTcType | stage<TypeChecker = const "{!type placeholder here?!}" :: PostTcType -> String
@@ -266,7 +276,7 @@ showData stage n =
 -- | Like 'everything', but avoid known potholes, based on the 'Stage' that
 --   generated the Ast.
 everythingStaged :: Stage -> (r -> r -> r) -> r -> GenericQ r -> GenericQ r
-everythingStaged stage k z f x 
+everythingStaged stage k z f x
   | (const False
 #if __GLASGOW_HASKELL__ <= 708
       `extQ` postTcType
@@ -282,7 +292,7 @@ everythingStaged stage k z f x
 -- | A variation of 'everything', using a 'GenericQ Bool' to skip
 --   parts of the input 'Data'.
 --everythingBut :: GenericQ Bool -> (r -> r -> r) -> r -> GenericQ r -> GenericQ r
---everythingBut q k z f x 
+--everythingBut q k z f x
 --  | q x       = z
 --  | otherwise = foldl k (f x) (gmapQ (everythingBut q k z f) x)
 
@@ -372,5 +382,3 @@ everywhereMStaged stage f x
         postTcType = const (stage<TypeChecker)                 :: PostTcType -> Bool
 #endif
         fixity     = const (stage<Renamer)                     :: GHC.Fixity -> Bool
-
-
